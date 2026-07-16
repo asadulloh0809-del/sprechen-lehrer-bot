@@ -25,6 +25,16 @@ async def start_web_server():
     while True:
         await asyncio.sleep(3600)
 
+from aiogram.types import BotCommand
+
+async def set_bot_commands(bot: Bot):
+    commands = [
+        BotCommand(command="start", description="🔄 Til va darajani o'zgartirish"),
+        BotCommand(command="stats", description="📊 Mening statistikam"),
+        BotCommand(command="help", description="❓ Yordam")
+    ]
+    await bot.set_my_commands(commands)
+
 async def main():
     logging.basicConfig(level=logging.INFO)
     db.init_db()
@@ -37,6 +47,7 @@ async def main():
     
     print("Bot ishga tushdi... Telegramda botga yozishingiz mumkin!")
     await bot.delete_webhook(drop_pending_updates=True)
+    await set_bot_commands(bot)
     
     await asyncio.gather(
         start_web_server(),
