@@ -73,3 +73,39 @@ Eslatma: O'quvchiga doim do'stona va ruhlantiruvchi ohangda murojaat qil.
             return "Entschuldigung, beim Analysieren der Nachricht ist ein Fehler aufgetreten. Bitte versuchen Sie es später erneut."
         else:
             return "Kechirasiz, xabarni tahlil qilishda xatolik yuz berdi. Iltimos, keyinroq qaytadan urinib ko'ring."
+
+async def analyze_text_word(text: str, lang: str = "uz", level: str = "A2") -> tuple[str, str]:
+    if lang == "de":
+        explanation_lang = "NEMIS TILIDA (auf Deutsch)"
+    else:
+        explanation_lang = "O'ZBEK TILIDA"
+        
+    SYSTEM_PROMPT = f"""
+Sen nemis tili o'qituvchisisan. O'quvchi biron so'z yoki qisqa matn yozdi. Darajasi: {level}.
+Vazifang:
+1. Matn xato bo'lsa to'g'rilash.
+2. Ma'nosini {explanation_lang} tushuntirish.
+3. Eng muhimi, birinchi qatorga FAQATGINA to'g'rilangan NEMISCHA so'zni yoki gapni yoz (gTTS talaffuz qilishi uchun).
+
+Struktura shunday bo'lsin:
+[Faqatgina to'g'ri nemischa so'z - hech qanday belgisiz]
+<b>Ma'nosi:</b> (tushuntirish va xatolarni ko'rsatish)
+"""
+    try:
+        chat_completion = await client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"O'quvchi yozdi: '{text}'"}
+            ],
+            model="llama-3.3-70b-versatile",
+        )
+        
+        response = chat_completion.choices[0].message.content.strip()
+        parts = response.split("\n", 1)
+        correct_word = parts[0].strip()
+        explanation = parts[1].strip() if len(parts) > 1 else "Tushuntirish yo'q."
+        
+        return explanation, correct_word
+    except Exception as e:
+        print(f"Error in text analysis: {e}")
+        return ("Kechirasiz, xatolik yuz berdi.", "")
