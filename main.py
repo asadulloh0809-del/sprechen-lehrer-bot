@@ -30,6 +30,7 @@ from aiogram.types import BotCommand
 async def set_bot_commands(bot: Bot):
     commands = [
         BotCommand(command="start", description="🔄 Til va darajani o'zgartirish"),
+        BotCommand(command="wort", description="🔤 So'z talafuzi"),
         BotCommand(command="stats", description="📊 Mening statistikam"),
         BotCommand(command="help", description="❓ Yordam")
     ]
