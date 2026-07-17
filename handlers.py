@@ -1,9 +1,11 @@
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.filters import CommandStart, Command
 from aiogram.enums import ChatAction
 import os
-from services.ai_service import analyze_voice
+import asyncio
+from gtts import gTTS
+from services.ai_service import analyze_voice, analyze_text_word
 import database as db
 
 router = Router()
@@ -65,17 +67,26 @@ async def process_level_selection(callback: CallbackQuery):
     if lang == "uz":
         text = (
             f"Ajoyib! Darajangiz: <b>{selected_level}</b>.\n\n"
-            "Menga istalgan mavzuda nemis tilida ovozli xabar yuboring, men xatolaringizni to'g'irlab, yordam beraman.\n\n"
+            "Menga istalgan mavzuda nemis tilida ovozli xabar yoki matn yuboring, men xatolaringizni to'g'irlab, yordam beraman.\n\n"
             "<i>Los geht's!</i> (Qani ketdik!)"
         )
     else:
         text = (
             f"Perfekt! Ihr Niveau: <b>{selected_level}</b>.\n\n"
-            "Bitte senden Sie mir eine Sprachnachricht auf Deutsch. Ich werde Ihre Fehler korrigieren und Ihnen helfen, sich zu verbessern.\n\n"
+            "Bitte senden Sie mir eine Sprachnachricht oder einen Text auf Deutsch. Ich werde Ihre Fehler korrigieren und Ihnen helfen, sich zu verbessern.\n\n"
             "<i>Los geht's!</i>"
         )
         
     await callback.message.edit_text(text, parse_mode="HTML")
+
+@router.message(Command("wort"))
+async def cmd_wort(message: Message):
+    lang, _ = db.get_user_pref(message.from_user.id)
+    if lang == "uz":
+        text = "Menga istalgan nemischa so'z yoki gapni yozib yuboring. Men uni to'g'rilayman va qanday talaffuz qilinishini aytib beraman! 🎙"
+    else:
+        text = "Schreiben Sie mir ein beliebiges deutsches Wort oder einen Satz. Ich werde es korrigieren und Ihnen die Aussprache senden! 🎙"
+    await message.answer(text)
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
@@ -83,17 +94,19 @@ async def cmd_help(message: Message):
     if lang == "uz":
         help_text = (
             "<b>Yordam bo'limi:</b>\n"
-            "Botga har qanday nemis tilidagi ovozli xabarni yuboring. "
+            "Botga har qanday nemis tilidagi ovozli xabar yoki matn yuboring. "
             "Bot uni tahlil qilib sizga tavsiyalar beradi.\n\n"
             "/start - Til va darajani o'zgartirish\n"
+            "/wort - So'z talaffuzini o'rganish\n"
             "/stats - O'z statistikangizni ko'rish"
         )
     else:
         help_text = (
             "<b>Hilfe:</b>\n"
-            "Senden Sie einfach eine Sprachnachricht auf Deutsch. "
+            "Senden Sie einfach eine Sprachnachricht oder einen Text auf Deutsch. "
             "Der Bot analysiert sie und gibt Ihnen Feedback.\n\n"
             "/start - Sprache und Niveau ändern\n"
+            "/wort - Aussprache lernen\n"
             "/stats - Ihre Statistiken anzeigen"
         )
     await message.answer(help_text, parse_mode="HTML")
@@ -143,11 +156,40 @@ async def handle_voice(message: Message, bot: Bot):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-@router.message(~F.voice & ~F.text.startswith('/'))
-async def handle_text(message: Message):
-    lang, _ = db.get_user_pref(message.from_user.id)
-    if lang == "uz":
-        text = "Iltimos, menga nemis tilida <b>ovozli xabar (voice message)</b> yuboring."
-    else:
-        text = "Bitte senden Sie mir eine <b>Sprachnachricht</b> auf Deutsch."
-    await message.answer(text, parse_mode="HTML")
+@router.message(F.text & ~F.text.startswith('/'))
+async def handle_text(message: Message, bot: Bot):
+    db.add_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
+    lang, level = db.get_user_pref(message.from_user.id)
+    
+    wait_text = "<i>Matn tahlil qilinmoqda... ⏳</i>" if lang == "uz" else "<i>Wird analysiert... ⏳</i>"
+    wait_msg = await message.answer(wait_text, parse_mode="HTML")
+    await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
+    
+    explanation, correct_word = await analyze_text_word(message.text, lang, level)
+    
+    if not correct_word:
+        err_text = "Xatolik yuz berdi. Iltimos qaytadan urinib ko'ring." if lang == "uz" else "Ein Fehler ist aufgetreten."
+        await wait_msg.edit_text(err_text)
+        return
+        
+    await wait_msg.edit_text(explanation, parse_mode="HTML")
+    await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.RECORD_VOICE)
+    
+    try:
+        def generate_tts():
+            tts = gTTS(text=correct_word, lang='de')
+            os.makedirs("temp", exist_ok=True)
+            path = f"temp/{message.from_user.id}_word.ogg"
+            tts.save(path)
+            return path
+            
+        audio_path = await asyncio.to_thread(generate_tts)
+        audio = FSInputFile(audio_path)
+        
+        caption = "🎙 Talaffuz (Aussprache)" if lang == "uz" else "🎙 Aussprache"
+        await message.answer_voice(audio, caption=caption)
+        
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+    except Exception as e:
+        print(f"Error generating TTS: {e}")
